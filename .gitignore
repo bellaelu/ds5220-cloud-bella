@@ -1,4 +1,10 @@
+dp1
+dp2
 *scrap*
 Pipfile*
 *Pipfile*
-dp*
+*.terraform*
+*.tfstate
+*.backup
+storage
+**tfstate*
