@@ -6,18 +6,28 @@
       "Action": [
         "dynamodb:PutItem",
         "dynamodb:Query",
-        "dynamodb:GetItem"
+        "dynamodb:GetItem",
+        "dynamodb:Scan"
       ],
-      "Resource": "arn:aws:dynamodb:*:*:table/ISS_Tracker"
+      "Resource": "arn:aws:dynamodb:us-east-1:269829599210:table/ISS_Tracker"
     },
     {
       "Effect": "Allow",
       "Action": [
         "s3:PutObject",
-        "s3:PutObjectAcl",
-        "s3:GetObject"
+        "s3:GetObject",
+        "s3:PutObjectAcl"
       ],
       "Resource": "arn:aws:s3:::ds5220-iss-bella/*"
+    },
+    {
+      "Effect": "Allow",
+      "Action": [
+        "logs:CreateLogGroup",
+        "logs:CreateLogStream",
+        "logs:PutLogEvents"
+      ],
+      "Resource": "arn:aws:logs:*:*:*"
     }
   ]
 }

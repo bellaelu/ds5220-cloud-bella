@@ -1,7 +1,3 @@
-##
-## Headless Service — provides stable DNS names for each Kafka broker
-## (kafka-0.kafka-headless.kafka.svc.cluster.local, etc.)
-##
 apiVersion: v1
 kind: Service
 metadata:
@@ -21,9 +17,6 @@ spec:
   selector:
     app: kafka
 ---
-##
-## ClusterIP Service — a single entry point for clients inside the cluster
-##
 apiVersion: v1
 kind: Service
 metadata:
@@ -40,28 +33,6 @@ spec:
   selector:
     app: kafka
 ---
-##
-## ConfigMap — shared Kafka KRaft configuration
-##
-apiVersion: v1
-kind: ConfigMap
-metadata:
-  name: kafka-config
-  namespace: kafka
-data:
-  KAFKA_KRAFT_CLUSTER_ID: "MkU3OEVBNTcwNTJENDM2Qk"
-  CLUSTER_ID: "MkU3OEVBNTcwNTJENDM2Qk"
-  KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: "CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT"
-  KAFKA_INTER_BROKER_LISTENER_NAME: "PLAINTEXT"
-  KAFKA_CONTROLLER_LISTENER_NAMES: "CONTROLLER"
-  KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: "3"
-  KAFKA_DEFAULT_REPLICATION_FACTOR: "3"
-  KAFKA_NUM_PARTITIONS: "3"
-  KAFKA_LOG_RETENTION_HOURS: "1"
----
-##
-## StatefulSet — three Kafka broker/controller nodes in KRaft mode
-##
 apiVersion: apps/v1
 kind: StatefulSet
 metadata:
@@ -89,61 +60,26 @@ spec:
               name: broker
             - containerPort: 9093
               name: controller
-          envFrom:
-            - configMapRef:
-                name: kafka-config
-          env:
-            ##
-            ## The pod name (kafka-0, kafka-1, kafka-2) is injected so
-            ## the start-up script can derive a unique node ID and
-            ## build the correct advertised listener.
-            ##
-            - name: POD_NAME
-              valueFrom:
-                fieldRef:
-                  fieldPath: metadata.name
           command:
             - /bin/bash
             - -c
             - |
-              # Extract the ordinal index from the pod name (e.g. kafka-1 -> 1)
-              export ORDINAL=${POD_NAME##*-}
-              export KAFKA_NODE_ID=$ORDINAL
-
-              # Every node acts as both broker AND controller
-              export KAFKA_PROCESS_ROLES="broker,controller"
-
-              # Controller quorum voters — all three nodes
-              export KAFKA_CONTROLLER_QUORUM_VOTERS="0@kafka-0.kafka-headless.kafka.svc.cluster.local:9093,1@kafka-1.kafka-headless.kafka.svc.cluster.local:9093,2@kafka-2.kafka-headless.kafka.svc.cluster.local:9093"
-
-              # Listeners & advertised listeners
-              export KAFKA_LISTENERS="PLAINTEXT://0.0.0.0:9092,CONTROLLER://0.0.0.0:9093"
-              export KAFKA_ADVERTISED_LISTENERS="PLAINTEXT://${POD_NAME}.kafka-headless.kafka.svc.cluster.local:9092"
-
-              # Log directory
-              export KAFKA_LOG_DIRS="/tmp/kraft-combined-logs"
-
-              # Format the storage directory (safe to re-run; exits 0 if already formatted)
+              ORDINAL=${HOSTNAME##*-}
+              CFG=/opt/kafka/config/kraft/server.properties
+ 
+              sed -i "s|^advertised.listeners=.*|advertised.listeners=PLAINTEXT://${HOSTNAME}.kafka-headless.kafka.svc.cluster.local:9092,CONTROLLER://${HOSTNAME}.kafka-headless.kafka.svc.cluster.local:9093|" $CFG
+              sed -i "s|^listeners=.*|listeners=PLAINTEXT://0.0.0.0:9092,CONTROLLER://0.0.0.0:9093|" $CFG
+              sed -i "s|^node.id=.*|node.id=$ORDINAL|" $CFG
+              sed -i "s|^process.roles=.*|process.roles=broker,controller|" $CFG
+              sed -i "s|^controller.quorum.voters=.*|controller.quorum.voters=0@kafka-0.kafka-headless.kafka.svc.cluster.local:9093,1@kafka-1.kafka-headless.kafka.svc.cluster.local:9093,2@kafka-2.kafka-headless.kafka.svc.cluster.local:9093|" $CFG
+              sed -i "s|^log.dirs=.*|log.dirs=/tmp/kraft-combined-logs|" $CFG
+ 
               /opt/kafka/bin/kafka-storage.sh format \
-                --config /opt/kafka/config/kraft/server.properties \
-                --cluster-id "$CLUSTER_ID" \
+                --config $CFG \
+                --cluster-id "MkU3OEVBNTcwNTJENDM2Qk" \
                 --ignore-formatted
-
-              # Start Kafka
-              exec /opt/kafka/bin/kafka-server-start.sh /opt/kafka/config/kraft/server.properties \
-                --override node.id=$KAFKA_NODE_ID \
-                --override process.roles=$KAFKA_PROCESS_ROLES \
-                --override controller.quorum.voters="$KAFKA_CONTROLLER_QUORUM_VOTERS" \
-                --override listeners=$KAFKA_LISTENERS \
-                --override advertised.listeners=$KAFKA_ADVERTISED_LISTENERS \
-                --override listener.security.protocol.map=$KAFKA_LISTENER_SECURITY_PROTOCOL_MAP \
-                --override inter.broker.listener.name=$KAFKA_INTER_BROKER_LISTENER_NAME \
-                --override controller.listener.names=$KAFKA_CONTROLLER_LISTENER_NAMES \
-                --override offsets.topic.replication.factor=$KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR \
-                --override default.replication.factor=$KAFKA_DEFAULT_REPLICATION_FACTOR \
-                --override num.partitions=$KAFKA_NUM_PARTITIONS \
-                --override log.retention.hours=$KAFKA_LOG_RETENTION_HOURS \
-                --override log.dirs=$KAFKA_LOG_DIRS
+ 
+              exec /opt/kafka/bin/kafka-server-start.sh $CFG
           resources:
             requests:
               memory: "512Mi"
@@ -151,8 +87,3 @@ spec:
             limits:
               memory: "1Gi"
               cpu: "500m"
-          readinessProbe:
-            tcpSocket:
-              port: 9092
-            initialDelaySeconds: 30
-            periodSeconds: 10

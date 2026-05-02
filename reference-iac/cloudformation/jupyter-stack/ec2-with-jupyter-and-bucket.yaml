@@ -39,6 +39,8 @@ Resources:
         - Key: Name
           Value: !Sub ${AWS::StackName}-ec2-sg
 
+  #IAM role for EC2 instance 
+  #gives permission to instance that goes with instance profile +IAM policy 
   EC2InstanceRole:
     Type: AWS::IAM::Role
     Properties:
@@ -70,14 +72,18 @@ Resources:
         Statement:
           - Effect: Allow
             Action:
+              #allow full control of objects in the new bucket
               - s3:GetObject
               - s3:PutObject
               - s3:DeleteObject
               - s3:ListBucket
+              #allow the role to list all my buckets
               - s3:ListAllMyBuckets
             Resource:
+              #the specific bucket created in this template
               - !Sub ${S3Bucket.Arn}/*
               - !Sub ${S3Bucket.Arn}
+              #all my buckets
               - arn:aws:s3:::*
       Roles:
         - !Ref EC2InstanceRole
@@ -99,9 +105,12 @@ Resources:
   EC2Instance:
     Type: AWS::EC2::Instance
     Properties:
+      #get the AMI for Ubuntu 24.04LTS in this region where you will launch 
       ImageId: ami-0b6c6ebed2801a5cb
+      #let the user choose above in the parameters 
       InstanceType: !Ref InstanceType
       KeyName: !Ref KeyName
+      #gets built above with 2 ingress rules
       SecurityGroupIds:
         - !Ref EC2SecurityGroup
       IamInstanceProfile: !Ref EC2InstanceProfile

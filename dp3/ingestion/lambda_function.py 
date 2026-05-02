@@ -1,0 +1,57 @@
+import boto3
+import requests
+import time
+import matplotlib.pyplot as plt
+import pandas as pd
+from io import BytesIO
+
+def lambda_handler(event, context):
+    table_name = 'ISS_Tracker'
+    bucket_name = 'ds5220-iss-bella2'
+    db = boto3.resource('dynamodb')
+    table = db.Table(table_name)
+    s3 = boto3.client('s3')
+
+    try:
+        # 1. Fetch Data
+        resp = requests.get("http://api.open-notify.org/iss-now.json")
+        data = resp.json()
+        
+        item = {
+            'device': 'iss',
+            'timestamp': int(data['timestamp']),
+            'lat': data['iss_position']['latitude'],
+            'lon': data['iss_position']['longitude']
+        }
+        
+        # 2. Save to DynamoDB
+        table.put_item(Item=item)
+        print(f"Logged: {item}")
+
+        # 3. Generate Plot (Render on Write)
+        # Pull last 20 records
+        history = table.query(
+            KeyConditionExpression=boto3.condition.Key('device').eq('iss'),
+            ScanIndexForward=False, Limit=20
+        )['Items']
+        
+        df = pd.DataFrame(history)
+        plt.figure(figsize=(10,5))
+        plt.plot(df['lon'].astype(float), df['lat'].astype(float), 'ro-')
+        plt.title("ISS Path (Last 20 Samples)")
+        
+        img_data = BytesIO()
+        plt.savefig(img_data, format='png')
+        img_data.seek(0)
+        
+        # 4. Upload Plot to S3
+        s3.put_object(
+            Bucket=bucket_name,
+            Key='latest_iss.png',
+            Body=img_data,
+            ContentType='image/png',
+            ACL='public-read' # CRITICAL for the Discord bot
+        )
+
+    except Exception as e:
+        print(f"Error: {e}")

@@ -1,85 +1,152 @@
+import json
+import urllib.parse
 import boto3
 import requests
+import logging
 from chalice import Chalice
 from boto3.dynamodb.conditions import Key
 
+logger = logging.getLogger()
+logger.setLevel(logging.INFO)
+
 app = Chalice(app_name='infrastructure')
 
-BUCKET_NAME = 'ds5220-iss-bella'
+BUCKET_NAME = 'ds5220-iss-bella2'
+TABLE_NAME = 'ISS_Tracker'
+
 
 @app.route('/')
 def index():
     return {
-        "about": "Tracks the International Space Station coordinates and generates an orbital path plot.",
+        "about": "Tracks the International Space Station position every 10 minutes and plots its orbital path.",
         "resources": ["current", "trend", "plot"]
     }
 
+
 @app.route('/current')
 def current():
-    table = boto3.resource('dynamodb').Table('ISS_Tracker')
-    res = table.query(KeyConditionExpression=Key('device').eq('iss'), ScanIndexForward=False, Limit=1)
-    if not res.get('Items'):
-        return {"response": "No data collected yet."}
-    latest = res['Items'][0]
-    return {"response": f"The ISS is currently over Lat: {latest['lat']}, Lon: {latest['lon']}"}
+    try:
+        table = boto3.resource('dynamodb', region_name='us-east-1').Table(TABLE_NAME)
+        res = table.query(
+            KeyConditionExpression=Key('device').eq('iss'),
+            ScanIndexForward=False,
+            Limit=1
+        )
+        if not res.get('Items'):
+            return {"response": "No data collected yet."}
+        latest = res['Items'][0]
+        lat = float(latest['lat'])
+        lon = float(latest['lon'])
+        return {"response": f"ISS is currently at Lat: {lat:.2f}, Lon: {lon:.2f}"}
+    except Exception as e:
+        logger.error(f"Error in /current: {e}")
+        return {"response": f"Error fetching current position: {str(e)}"}
 
-@app.route('/plot')
-def plot():
-    url = f"https://{BUCKET_NAME}.s3.amazonaws.com/latest_plot.png"
-    return {"response": url}
 
 @app.route('/trend')
 def trend():
-    return {"response": "The ISS maintains an orbital speed of ~17,100 mph."}
+    try:
+        table = boto3.resource('dynamodb', region_name='us-east-1').Table(TABLE_NAME)
+        res = table.query(
+            KeyConditionExpression=Key('device').eq('iss'),
+            ScanIndexForward=False,
+            Limit=20
+        )
+        items = res.get('Items', [])
+        if len(items) < 2:
+            return {"response": "Not enough data yet for trend analysis."}
+        lats = [float(i['lat']) for i in items]
+        lons = [float(i['lon']) for i in items]
+        avg_lat = sum(lats) / len(lats)
+        avg_lon = sum(lons) / len(lons)
+        return {"response": f"Over last {len(items)} samples, avg position: Lat {avg_lat:.2f}, Lon {avg_lon:.2f}"}
+    except Exception as e:
+        logger.error(f"Error in /trend: {e}")
+        return {"response": f"Error computing trend: {str(e)}"}
+
+
+@app.route('/plot')
+def plot():
+    try:
+        url = f"https://{BUCKET_NAME}.s3.amazonaws.com/latest_plot.png"
+        return {"response": url}
+    except Exception as e:
+        logger.error(f"Error in /plot: {e}")
+        return {"response": f"Error: {str(e)}"}
+
 
 @app.schedule('rate(10 minutes)')
 def run_ingestion(event):
     try:
-        # 1. Fetch current ISS position
-        r = requests.get("http://api.open-notify.org/iss-now.json")
+        logger.info("Starting ISS ingestion...")
+
+        r = requests.get("http://api.open-notify.org/iss-now.json", timeout=10)
+        r.raise_for_status()
         data = r.json()
-        
-        # 2. Setup AWS Resources
-        db = boto3.resource('dynamodb')
-        table = db.Table('ISS_Tracker')
-        s3 = boto3.client('s3')
-        
-        # 3. Save to DynamoDB
-        table.put_item(Item={
+        logger.info(f"Fetched ISS data: {data}")
+
+        table = boto3.resource('dynamodb', region_name='us-east-1').Table(TABLE_NAME)
+        item = {
             'device': 'iss',
             'timestamp': int(data['timestamp']),
             'lat': data['iss_position']['latitude'],
             'lon': data['iss_position']['longitude']
-        })
+        }
+        table.put_item(Item=item)
+        logger.info(f"Saved to DynamoDB: {item}")
 
-        # 4. Generate Plot Data (Pull last 10 points)
-        res = table.query(KeyConditionExpression=Key('device').eq('iss'), Limit=10)
-        # QuickChart needs strings or numbers for the URL
-        lats = [float(i['lat']) for i in res['Items']]
-        lons = [float(i['lon']) for i in res['Items']]
+        res = table.query(
+            KeyConditionExpression=Key('device').eq('iss'),
+            ScanIndexForward=False,
+            Limit=20
+        )
+        items = res.get('Items', [])
+        logger.info(f"Retrieved {len(items)} items for plot")
 
-        # 5. Call QuickChart API to get an image
-        # This creates a simple line chart of Latitude vs Longitude
+        if len(items) < 2:
+            logger.info("Not enough data to plot yet, skipping chart generation")
+            return
+
+        lats = [float(i['lat']) for i in items]
+        lons = [float(i['lon']) for i in items]
+
         chart_config = {
             "type": "line",
             "data": {
-                "labels": lons,
-                "datasets": [{"label": "ISS Path", "data": lats, "borderColor": "blue"}]
+                "labels": [str(round(lo, 2)) for lo in lons],
+                "datasets": [{
+                    "label": "ISS Latitude",
+                    "data": lats,
+                    "borderColor": "rgb(255,99,132)",
+                    "fill": False
+                }]
+            },
+            "options": {
+                "title": {
+                    "display": True,
+                    "text": "ISS Path - Lat vs Lon"
+                }
             }
         }
-        chart_url = f"https://quickchart.io/chart?c={chart_config}".replace(" ", "")
-        
-        # 6. Download image and upload to S3
-        img_response = requests.get(chart_url)
-        if img_response.status_code == 200:
-            s3.put_object(
-                Bucket=BUCKET_NAME,
-                Key='latest_plot.png',
-                Body=img_response.content,
-                ContentType='image/png',
-                ACL='public-read'  # Makes it viewable on Discord
-            )
-            print("Plot successfully updated in S3.")
 
+        chart_url = "https://quickchart.io/chart?c=" + urllib.parse.quote(json.dumps(chart_config))
+        logger.info("QuickChart URL built, fetching image...")
+
+        img_response = requests.get(chart_url, timeout=15)
+        img_response.raise_for_status()
+        logger.info("Chart image downloaded successfully")
+
+        s3 = boto3.client('s3', region_name='us-east-1')
+        s3.put_object(
+            Bucket=BUCKET_NAME,
+            Key='latest_plot.png',
+            Body=img_response.content,
+            ContentType='image/png',
+
+        )
+        logger.info(f"Plot uploaded to S3: s3://{BUCKET_NAME}/latest_plot.png")
+
+    except requests.exceptions.RequestException as e:
+        logger.error(f"HTTP request failed: {e}")
     except Exception as e:
-        print(f"Error during ingestion/plotting: {e}")
+        logger.error(f"Unexpected error in run_ingestion: {e}", exc_info=True)

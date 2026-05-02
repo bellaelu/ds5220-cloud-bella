@@ -1,5 +1,37 @@
 # DS5220 — Data Project 3
 
+Answers to the questions: 
+
+What data source you tracked and why.
+
+I used the ISS Location API (Open Notify). 
+I used this because it provides a reliable JSON stream of the ISS's latitude and longitude. The ISS moves continuously at ~17,500 mph so it is an ideal time-series data source. 
+
+How often it's sampled and what the storage schema looks like.
+
+The data is sampled every 10 minutes and is managed by an AWS Lambda function triggered by a Chalice Scheduled Event (rate(10minutes)) 
+The data is stored in an Amazon DynamoDB table named ISS_Tracker. 
+The schema's partition PK is hardcoded to 'iss' to allow for easy querying of the station's history. Sort Key uses the Unix timestamp to keep records in chronological order to allow for time-range filtering. 
+The attributes are the latitude (lat) and longitude (lon) 
+
+A description of each API resource and what it returns.
+
+Resources: 
+- GET / - retuurns project description and available resources 
+- GET /current: returns the latest Lat/Lon from DynamoDB and queries DynamoDB for the most recent entry
+- GET /trend: returns a static fact about ISS orbital speed
+- GET /plot: returns an S3 URL for a graph generated using QuickChart and stored in S3
+
+Any stretch goals you added.
+The stretch goals I used to overcome the Lambda size limit was the Serverless Visualization via QuickChart API. Instead of using too many libraries like matplotlib and pandas, there was a lightweight implementation using QuickChart API. 
+The Lambda sends teh last 10 coordinates to QuickChart, and is able to receive a rendered PNG map in return, and it automatically uploads that image to Amazon S3 with public-read permissions. This ensures that the Discord bot can display a fresh map every 10 minutes without hitting memory or storage limits on the lambda. 
+
+Storage: 
+- Dynamo DB table ISS_Tracker with device as the PK and timestampe as the SK. 
+
+
+
+
 Our final project has **two parts**, and they should be built to fit together:
 
 1. **A data ingestion pipeline** — a cloud-based, serverless process that continually tracks a *meaningful, changing* data source and writes it to a persistent store.
