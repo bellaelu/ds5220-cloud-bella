@@ -1,0 +1,39 @@
+{
+  "resources": [
+    {
+      "name": "run_ingestion_role",
+      "resource_type": "iam_role",
+      "role_arn": "arn:aws:iam::269829599210:role/infrastructure-dev-run_ingestion",
+      "role_name": "infrastructure-dev-run_ingestion"
+    },
+    {
+      "name": "run_ingestion",
+      "resource_type": "lambda_function",
+      "lambda_arn": "arn:aws:lambda:us-east-1:269829599210:function:infrastructure-dev-run_ingestion"
+    },
+    {
+      "name": "run_ingestion-event",
+      "resource_type": "cloudwatch_event",
+      "rule_name": "infrastructure-dev-run_ingestion-event"
+    },
+    {
+      "name": "api_handler_role",
+      "resource_type": "iam_role",
+      "role_arn": "arn:aws:iam::269829599210:role/infrastructure-dev-api_handler",
+      "role_name": "infrastructure-dev-api_handler"
+    },
+    {
+      "name": "api_handler",
+      "resource_type": "lambda_function",
+      "lambda_arn": "arn:aws:lambda:us-east-1:269829599210:function:infrastructure-dev"
+    },
+    {
+      "name": "rest_api",
+      "resource_type": "rest_api",
+      "rest_api_id": "0f99ebzsje",
+      "rest_api_url": "https://0f99ebzsje.execute-api.us-east-1.amazonaws.com/api/"
+    }
+  ],
+  "schema_version": "2.0",
+  "backend": "api"
+}
